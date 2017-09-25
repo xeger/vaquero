@@ -1,0 +1,127 @@
+#! /bin/bash
+
+#######################################
+## Useful functions & globals
+#######################################
+
+vaquero_version=0.1.0
+
+say() {
+  echo "vaquero: $@"
+}
+
+explain-usage() {
+  echo "SSH tunnel wrangler version ${vaquero_version}"
+  echo
+  echo "Usage: vaquero [-f path/to/specfile] [user@]<hostname> <cmd>"
+  echo "  Opens an SSH session to hostname with port tunnels, runs cmd"
+  echo
+  echo "Options:"
+  echo "  -e  location of env to export before running cmd"
+  echo "  -f  location of tunnel specs"
+  echo
+  echo "Defaults:"
+  echo "  envfile is .env.vaquero (may exist)"
+  echo "  specfile is .vaquero (must exist)"
+  echo
+  echo "Files:"
+  echo "  Specfile contains tunnel specs, one per line."
+  echo "  To tunnel local 12345 to remote foo-service port 8080:"
+  echo "    12345:foo.service.consul:8080"
+  echo
+  echo "  Envfile contains variables for your service, one per line."
+  echo "  To tell your service about foo service:"
+  echo "    FOO_URL=http://localhost:12345"
+}
+
+make-tunnel-flags() {
+  local cmd
+  while read line
+  do
+    [ -n "$line" ] && cmd="${cmd} -L $line"
+  done
+
+  echo $cmd
+}
+
+run-ssh() {
+  say "run ssh $@"
+  ssh $@ tail -f /dev/null &
+}
+
+envify-and-run-cmd() {
+  while read line
+  do
+    if [ -n "$line" ]
+    then
+      export $line
+    fi
+  done
+
+  say "run $@"
+  $@ &
+}
+
+#######################################
+## Parse CLI parameters
+#######################################
+
+envfile='.env.vaquero'
+specfile='.vaquero'
+
+while getopts ":e:f:" opt; do
+  case ${opt} in
+    e )
+      envfile=$OPTARG
+      ;;
+    f )
+      specfile=$OPTARG
+      ;;
+    \? )
+      explain-usage
+      exit 0
+      ;;
+  esac
+done
+shift $((OPTIND -1))
+hostname="${1}"
+shift 1
+cmd="$@"
+
+if [ -z "$cmd" ]
+then
+  explain-usage
+  exit 1
+fi
+
+if [ ! -f $specfile ]; then
+  say "fatal: file unreadable or nonexistent - $specfile"
+  exit 2
+fi
+
+#######################################
+## Main program logic
+#######################################
+
+flags=`cat $specfile | make-tunnel-flags`
+
+run-ssh $flags $hostname
+ssh_pid=$!
+
+if [ -f $envfile ]
+then
+  cat $envfile | envify-and-run-cmd $cmd
+else
+  envify-and-run-cmd $cmd
+fi
+cmd_pid=$!
+
+function ctrl_c() {
+  echo "shutting down"
+  kill $ssh_pid
+  kill $cmd_pid
+}
+
+trap ctrl_c INT
+wait
+ctrl_c
