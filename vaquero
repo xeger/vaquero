@@ -4,7 +4,7 @@
 ## Useful functions & globals
 #######################################
 
-vaquero_version=0.1.0
+vaquero_version=0.2.0
 
 say() {
   echo "vaquero: $@"
@@ -13,16 +13,18 @@ say() {
 explain-usage() {
   echo "SSH tunnel wrangler version ${vaquero_version}"
   echo
-  echo "Usage: vaquero [-f path/to/specfile] [user@]<hostname> <cmd>"
+  echo "Usage: vaquero [-e path/envfile] [-f path/to/specfile] [user@]<hostname> <cmd>"
   echo "  Opens an SSH session to hostname with port tunnels, runs cmd"
   echo
   echo "Options:"
   echo "  -e  location of env to export before running cmd"
   echo "  -f  location of tunnel specs"
+  echo "  -s  add suffix to filenames"
   echo
   echo "Defaults:"
   echo "  envfile is .env.vaquero (may exist)"
   echo "  specfile is .vaquero (must exist)"
+  echo "  suffix is nothing; add `-s foo` for `.env.vaquero.foo` etc"
   echo
   echo "Files:"
   echo "  Specfile contains tunnel specs, one per line."
@@ -68,8 +70,9 @@ envify-and-run-cmd() {
 
 envfile='.env.vaquero'
 specfile='.vaquero'
+suffix=''
 
-while getopts ":e:f:" opt; do
+while getopts ":e:f:s:" opt; do
   case ${opt} in
     e )
       envfile=$OPTARG
@@ -77,12 +80,21 @@ while getopts ":e:f:" opt; do
     f )
       specfile=$OPTARG
       ;;
+    s )
+      suffix=".$OPTARG"
+      ;;
     \? )
       explain-usage
       exit 0
       ;;
   esac
 done
+
+if [ -n "$suffix" ]; then
+  envfile="${envfile}${suffix}"
+  specfile="${specfile}${suffix}"
+fi
+
 shift $((OPTIND -1))
 hostname="${1}"
 shift 1
@@ -116,12 +128,12 @@ else
 fi
 cmd_pid=$!
 
-function ctrl_c() {
+function ctrl-c() {
   echo "shutting down"
   kill $ssh_pid
   kill $cmd_pid
 }
 
-trap ctrl_c INT
+trap ctrl-c INT
 wait
-ctrl_c
+ctrl-c
